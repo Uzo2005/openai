@@ -148,15 +148,47 @@ type
 
 #In every type's init function I need to verify that the required params are set
 #the params would be the required ones first and then others as varargs
-proc createCompletionRequest*(model: string, prompt: string | openArray[
-    int] | openArray[openArray[int]] = "<|endoftext|>",
-        suffix: string = "", max_tokens: Natural = 16, temperature: range[
-            0.0..2.0] = 1, top_p: range[0.0..1.0] = 1, n: range[
-                1..128] = 1, stream: bool = false, logprobs: range[0..5] = 0,
-                    echo: bool = false, stop: string | array[1, string] | array[
-                        2, string] | array[3, string] | array[4,
-                        string] = "", presence_penalty: range[-2.0..2.0] = 0,
-                            frequency_penalty: int) = discard
+
+# proc createCompletionRequest(model: string, moreParams: varargs[string, `$`]) : CompletionRequest =
+#   result = CompletionRequest(model: model)
+  # for param in moreParams:
+  #   result.param = param
+
+
+
+
+
+# proc createCompletionRequest*(model: string, prompt: string | openArray[
+#     int] | openArray[openArray[int]] = "<|endoftext|>",
+#         suffix: string = "", max_tokens: Natural = 16, temperature: range[
+#             0.0..2.0] = 1, top_p: range[0.0..1.0] = 1, n: range[
+#                 1..128] = 1, stream: bool = false, logprobs: range[0..5] = 0,
+#                     echo: bool = false, stop: string | array[1, string] | array[
+#                         2, string] | array[3, string] | array[4,
+#                         string] = "", presence_penalty: range[-2.0..2.0] = 0,
+#                             frequency_penalty: range[-2.0..2.0] = 0,
+#                                 best_of: range[0..20] = 1,
+#                                     logit_bias: Table[string, range[-100..100]] = initTable[string, range[-100..100]](), user: string = ""): JsonNode =
+#   result = %*{
+#                 "model": model,
+#                 "prompt": prompt,
+#                 "suffix": suffix,
+#                 ""
+#               }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 type
   Model = object
