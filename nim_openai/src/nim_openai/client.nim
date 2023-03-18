@@ -100,13 +100,49 @@ proc deleteAsync(client: AsyncHttpClient; relativePath: string): Future[
   result = client.delete(OPEN_AI_API_URL & relativePath)
 
 
+template makeRequestProc(procName, procType: untyped; requiredParams, optionalParams: seq[string]): untyped =
+  proc `procName`(body: JsonNode): `procType` =
+    var 
+        temp = %*{}
+        required = toHashSet(`requiredParams`)
+        optional = toHashSet(`optionalParams`)
+        allPossibleParams = required + optional
+    
+    for key in body.keys:
+        if key in allPossibleParams:
+            allPossibleParams.excl(key)
+            temp[key] = body[key]
+        else:
+            echo key, " is not a valid key in the ", `procType`," schema"
+            quit(1)
+    
+    let omittedRequiredParams = allPossibleParams - optional
+
+    if omittedRequiredParams.len > 0:
+        echo omittedRequiredParams, " is a required Parameter in the ", `procType`, " schema but has not been provided"
+        quit(1)
+
+    result = temp
+
+
+
+
+
+
+
+
+
+
+
 
 proc createCompletion*(apiConfig: OpenAi_Api;
-    body: JsonNode): Response | Future[AsyncResponse]=
+    body: JsonNode): Response | Future[AsyncResponse] =
   ## Creates a completion for the provided prompt and parameters
   if apiConfig.isAsync:
-    result = postAsync(apiConfig.asynchttpClient, "/completions", $(%body))
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
+    result = postAsync(apiConfig.asynchttpClient, "/completions", $body)
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/completions", $(%body))
 
 
@@ -114,22 +150,28 @@ proc createChatCompletion*(apiConfig: OpenAi_Api;
     body: JsonNode): Response | Future[AsyncResponse] =
   ## Creates a completion for the chat message
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.httpClient, "/chat/completions", $(%body))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/chat/completions", $(%body))
 
 proc createEdit*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
   ## Creates a new edit for the provided input, instruction, and parameters.
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.httpClient, "/edits", $(%body))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.asynchttpClient, "/edits", $(%body))
 
 proc createImage*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
   ## Creates an image given a prompt.
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.httpClient, "/images/generations", $(%body))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.asynchttpClient, "/images/generations", $(%body))
 
 proc createImageEdit*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
@@ -145,8 +187,10 @@ proc createImageEdit*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[
                   "size": %body.size
       }
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "multipart/form-data"
     result = postAsync(apiConfig.asynchttpClient, "/images/edits", $newBody)
   else:
+    apiConfig.httpClient.headers["content"] = "multipart/form-data"
     result = postSync(apiConfig.httpClient, "/images/edits", $newBody)
 
 proc createImageVariation*(apiConfig: OpenAI_Api;
@@ -160,15 +204,19 @@ proc createImageVariation*(apiConfig: OpenAI_Api;
                   "size": %body.size
       }
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "multipart/form-data"
     result = postAsync(apiConfig.asynchttpClient, "/images/variations", $newBody)
   else:
+    apiConfig.httpClient.headers["content"] = "multipart/form-data"
     result = postSync(apiConfig.httpClient, "/images/variations", $newBody)
 
 proc createEmbedding*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
   ## Creates an embedding vector representing the input text.
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.asynchttpClient, "/embeddings", $(%body))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/embeddings", $(%body))
 
 proc createTranscription*(apiConfig: OpenAi_Api;
@@ -181,8 +229,10 @@ proc createTranscription*(apiConfig: OpenAi_Api;
                   "model": %body.model
       }
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "multipart/form-data"
     result = postAsync(apiConfig.asynchttpClient, "/audio/transcriptions", $newBody)
   else:
+    apiConfig.httpClient.headers["content"] = "multipart/form-data"
     result = postSync(apiConfig.httpClient, "/audio/transcriptions", $newBody)
 
 proc createTranslation*(apiConfig: OpenAi_Api;
@@ -195,8 +245,10 @@ proc createTranslation*(apiConfig: OpenAi_Api;
                   "model": %body.model
       }
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "multipart/form-data"
     result = postAsync(apiConfig.asynchttpClient, "/audio/translations", $newBody)
   else:
+    apiConfig.httpClient.headers["content"] = "multipart/form-data"
     result = postSync(apiConfig.httpClient, "/audio/translations", $newBody)
 
 proc createSearch*(apiConfig: OpenAi_Api; engineId: string,
@@ -209,15 +261,19 @@ proc createSearch*(apiConfig: OpenAi_Api; engineId: string,
   ##
   ##  The similarity score is a positive score that usually ranges from 0 to 300 (but can sometimes go higher), where a score above 200 usually means the document is semantically similar to the query.
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.asynchttpClient, fmt"/engines/{engineId}/search",$(%body))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, fmt"/engines/{engineId}/search", $(%body))
 
 proc listFiles*(apiConfig: OpenAi_Api): Response | Future[AsyncResponse] =
   ## Returns a list of files that belong to the user's organization.
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = getAsync(apiConfig.asynchttpclient, "/files")
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = getSync(apiConfig.httpClient, "/files")
 
 proc createFile*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
@@ -231,8 +287,10 @@ proc createFile*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[Async
                     "purpose": %body.purpose
       }
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "multipart/form-data"
     result = postAsync(apiConfig.asynchttpClient, "/file", $(%newBody))
   else:
+    apiConfig.httpClient.headers["content"] = "multipart/form-data"
     result = postSync(apiConfig.httpClient, "/file", $(%newBody))
 
 
@@ -261,8 +319,10 @@ proc createAnswer*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[Asy
   ## The endpoint first [searches](/docs/api-reference/searches) over provided documents or files to find relevant context.
   ##  The relevant context is combined with the provided examples and question to create the prompt for [completion](/docs/api-reference/completions).
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.asynchttpClient, "/answers", $(%body))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/answers", $(%body))
 
 proc createClassifications*(apiConfig: OpenAi_Api;
@@ -278,8 +338,10 @@ proc createClassifications*(apiConfig: OpenAi_Api;
   ## request using the `examples` parameter for quick tests and small scale use cases.
   
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.asynchttpClient, "/classifications", $(%body))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/classifications", $(%body))
 
 proc createFineTune*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
@@ -295,8 +357,10 @@ proc createFineTune*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[A
                   "training_file": %training_file
       }
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.asynchttpClient, "/fine-tunes", $(%newBody))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/fine-tunes", $(%newBody))
 
 proc listFineTunes*(apiConfig: OpenAi_Api): Response | Future[AsyncResponse] =
@@ -355,6 +419,8 @@ proc createModeration*(apiConfig: OpenAi_Api;
     body: JsonNode): Response | Future[AsyncResponse] =
   ## Classifies if text violates OpenAI's Content Policy
   if apiConfig.isAsync:
+    apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.asynchttpClient, "/moderations", $(%body))
   else:
+    apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/moderations", $(%body))

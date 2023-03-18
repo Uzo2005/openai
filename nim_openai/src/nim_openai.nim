@@ -71,31 +71,40 @@ var params = %*{
                 "messages": [
                                 1, 2, 3, 4
                             ],
-                "log_probs": 1
+                "log_probs": 1,
+                "stop": "wtf"
                 }
 
+type
+    Ca = JsonNode
+    Cb = JsonNode
 
-proc makea(body: JsonNode): string =
-    var 
-        temp = %*{}
-        required = toHashSet(["model", "stop", "log_probs"])
-        optional = toHashSet(["messages", "input"])
-        allPossibleParams = required + optional
-    
-    for key in body.keys:
-        if key in allPossibleParams:
-            allPossibleParams.excl(key)
-            temp[key] = body[key]
-        else:
-            echo key, " is not a valid key in this schema"
+
+template makeRequestProc(procName, procType: untyped; requiredParams, optionalParams: seq[string]): untyped =
+    proc `procName`(body: JsonNode): `procType` =
+        var 
+            temp = %*{}
+            required = toHashSet(`requiredParams`)
+            optional = toHashSet(`optionalParams`)
+            allPossibleParams = required + optional
+        
+        for key in body.keys:
+            if key in allPossibleParams:
+                allPossibleParams.excl(key)
+                temp[key] = body[key]
+            else:
+                echo key, " is not a valid key in the ", `procType`," schema"
+                quit(1)
+        
+        let omittedRequiredParams = allPossibleParams - optional
+
+        if omittedRequiredParams.len > 0:
+            echo omittedRequiredParams, " is a required Parameter in the ", `procType`, " schema but has not been provided"
             quit(1)
-    
-    let omittedRequiredParams = allPossibleParams - optional
 
-    if omittedRequiredParams.len > 0:
-        echo omittedRequiredParams, " is a required Parameter but has not been provided"
-        quit(1)
+        result = `procType`(temp)
+  
 
-    result = $temp
 
-echo makea(params)
+makeRequestProc(makea, Ca, @["model", "stop", "log_probs"], @["messages", "input"])
+makeRequestProc(makeb, Cb, @["model", "stop", "log_probs"], @["messages", "input"])
