@@ -43,7 +43,7 @@ proc loadEnvFile*(filename: string): Env =
     f.close()
     p.close()
 
-import std/[httpclient, asyncdispatch, json, strformat]
+import std/[httpclient, asyncdispatch, json, strformat, sets]
 
 
 const
@@ -100,31 +100,117 @@ proc deleteAsync(client: AsyncHttpClient; relativePath: string): Future[
   result = client.delete(OPEN_AI_API_URL & relativePath)
 
 
-template makeRequestProc(procName, procType: untyped; requiredParams, optionalParams: seq[string]): untyped =
+
+template makeRequestProc(procName, procType: untyped; requiredParams,
+    optionalParams: seq[string]): untyped =
   proc `procName`(body: JsonNode): `procType` =
-    var 
-        temp = %*{}
-        required = toHashSet(`requiredParams`)
-        optional = toHashSet(`optionalParams`)
-        allPossibleParams = required + optional
-    
+    var
+      temp = %*{}
+      required = toHashSet(`requiredParams`)
+      optional = toHashSet(`optionalParams`)
+      allPossibleParams = required + optional
+
     for key in body.keys:
-        if key in allPossibleParams:
-            allPossibleParams.excl(key)
-            temp[key] = body[key]
-        else:
-            echo key, " is not a valid key in the ", `procType`," schema"
-            quit(1)
-    
+      if key in allPossibleParams:
+        allPossibleParams.excl(key)
+        temp[key] = body[key]
+      else:
+        echo key, " is not a valid key in the ", `procType`, " schema"
+        quit(1)
+
     let omittedRequiredParams = allPossibleParams - optional
 
     if omittedRequiredParams.len > 0:
-        echo omittedRequiredParams, " is a required Parameter in the ", `procType`, " schema but has not been provided"
-        quit(1)
+      echo omittedRequiredParams, " is a required Parameter in the ",
+          `procType`, " schema but has not been provided"
+      quit(1)
 
     result = temp
 
+type
+  CompletionRequest = JsonNode
 
+  ChatCompletionRequest = JsonNode
+
+  EditRequest = JsonNode
+
+  ImageRequest = JsonNode
+
+  ImageEditRequest = JsonNode
+
+  ImageVariationRequest = JsonNode
+
+  EmbeddingRequest = JsonNode
+
+  TranscriptionRequest = JsonNode
+
+  TranslationRequest = JsonNode
+
+  SearchRequest = JsonNode
+
+  FileRequest = JsonNode
+
+  AnswerRequest = JsonNode
+
+  ClassificationRequest = JsonNode
+
+  FineTuneRequest = JsonNode
+
+  ModerationRequest = JsonNode
+
+makeRequestProc(createCompletionRequest, CompletionRequest, @["model"], @[
+    "prompt", "suffix", "max_tokens", "temperature", "top_p", "n", "stream",
+    "logprobs", "echo", "stop", "presence_penalty", "frequency_penalty",
+    "best_of", "logit_bias", "user"])
+
+makeRequestProc(createChatCompletionRequest, ChatCompletionRequest, @["model",
+    "messages"], @["temperature", "top_p", "n", "stream", "stop", "max_tokens",
+        "presence_penalty", "frequency_penalty", "logit_bias"])
+
+makeRequestProc(createEditRequest, EditRequest, @["model", "instruction"], @[
+    "instruction", "n", "temperature", "top_p"])
+
+makeRequestProc(createImageRequest, ImageRequest, @["prompt"], @["n", "size",
+    "response_format", "user"])
+
+makeRequestProc(createImageEdit, ImageEditRequest, @["prompt", "image"], @[
+    "mask", "n", "size", "response_format", "user"])
+
+makeRequestProc(createImageVariationRequest, ImageVariationRequest, @["image"],
+    @["n", "size", "response_format", "user"])
+
+makeRequestProc(createModerationRequest, ModerationRequest, @["input"], @["model"])
+
+makeRequestProc(createSearchRequest, SearchRequest, @["query"], @["documents",
+    "file", "max_rerank", "user"])
+
+makeRequestProc(createFileRequest, FileRequest, @["file", "purpose"], @[
+    "empty"]) #the empty optionalParams is just so the compiler will shut up
+
+makeRequestProc(createAnsweRequest, AnswerRequest, @["model", "question",
+    "examples", "examples_context"], @["documents", "file", "search_model",
+        "max_rerank", "temperature", "logprobs", "max_tokens", "stop", "n",
+        "logit_bias", "return_metadata", "return_prompt", "expand", "user"])
+
+makeRequestProc(createClassificationRequest, ClassificationRequest, @["model",
+    "query"], @["examples", "file", "labels", "search_model", "temperature",
+        "logprobs", "max_examples", "logit_bias", "return_prompt",
+        "return_metadata", "expand", "user"])
+
+makeRequestProc(createFineTuneRequest, FineTuneRequest, @["training_file"], @[
+    "validation_file", "model", "n_epochs", "batch_size",
+    "learning_rate_multiplier", "prompt_loss_weight",
+    "compute_classification_metrics", "classification_n_classes",
+    "classification_positive_class", "classification_betas", "suffix"])
+
+
+makeRequestProc(createEmbeddingRequest, EmbeddingRequest, @["model", "input"], @["user"])
+
+makeRequestProc(createTranscriptionRequest, TranscriptionRequest, @["file",
+    "model"], @["prompt", "response_format", "temperature", "language"])
+
+makeRequestProc(createTranslationRequest, TranslationRequest, @["file",
+    "model"], @["prompt", "response_format", "temperature"])
 
 
 
@@ -156,7 +242,8 @@ proc createChatCompletion*(apiConfig: OpenAi_Api;
     apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/chat/completions", $(%body))
 
-proc createEdit*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
+proc createEdit*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[
+    AsyncResponse] =
   ## Creates a new edit for the provided input, instruction, and parameters.
   if apiConfig.isAsync:
     apiConfig.asynchttpClient.headers["content"] = "application/json"
@@ -165,7 +252,8 @@ proc createEdit*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[Async
     apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.asynchttpClient, "/edits", $(%body))
 
-proc createImage*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
+proc createImage*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[
+    AsyncResponse] =
   ## Creates an image given a prompt.
   if apiConfig.isAsync:
     apiConfig.asynchttpClient.headers["content"] = "application/json"
@@ -174,7 +262,8 @@ proc createImage*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[Asyn
     apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.asynchttpClient, "/images/generations", $(%body))
 
-proc createImageEdit*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
+proc createImageEdit*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[
+    AsyncResponse] =
   ## Creates an edited or extended image given an original image and a prompt.
   let
     image = readFile(body.imageFilePath)
@@ -210,7 +299,8 @@ proc createImageVariation*(apiConfig: OpenAI_Api;
     apiConfig.httpClient.headers["content"] = "multipart/form-data"
     result = postSync(apiConfig.httpClient, "/images/variations", $newBody)
 
-proc createEmbedding*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
+proc createEmbedding*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[
+    AsyncResponse] =
   ## Creates an embedding vector representing the input text.
   if apiConfig.isAsync:
     apiConfig.asynchttpClient.headers["content"] = "application/json"
@@ -262,7 +352,8 @@ proc createSearch*(apiConfig: OpenAi_Api; engineId: string,
   ##  The similarity score is a positive score that usually ranges from 0 to 300 (but can sometimes go higher), where a score above 200 usually means the document is semantically similar to the query.
   if apiConfig.isAsync:
     apiConfig.asynchttpClient.headers["content"] = "application/json"
-    result = postAsync(apiConfig.asynchttpClient, fmt"/engines/{engineId}/search",$(%body))
+    result = postAsync(apiConfig.asynchttpClient,
+        fmt"/engines/{engineId}/search", $(%body))
   else:
     apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, fmt"/engines/{engineId}/search", $(%body))
@@ -276,7 +367,8 @@ proc listFiles*(apiConfig: OpenAi_Api): Response | Future[AsyncResponse] =
     apiConfig.httpClient.headers["content"] = "application/json"
     result = getSync(apiConfig.httpClient, "/files")
 
-proc createFile*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
+proc createFile*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[
+    AsyncResponse] =
   ## Upload a file that contains document(s) to be used across various endpoints/features.
   ##  Currently, the size of all the files uploaded by one organization can be up to 1 GB.
   ##  Please contact us if you need to increase the storage limit.
@@ -294,14 +386,16 @@ proc createFile*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[Async
     result = postSync(apiConfig.httpClient, "/file", $(%newBody))
 
 
-proc deleteFile*(apiConfig: OpenAi_Api; fileId: string): Response | Future[AsyncResponse] =
+proc deleteFile*(apiConfig: OpenAi_Api; fileId: string): Response | Future[
+    AsyncResponse] =
   ## Delete a file.
   if apiConfig.isAsync:
     result = deleteAsync(apiConfig.asynchttpClient, fmt"/files/{fileId}")
   else:
     result = deleteSync(apiConfig.httpClient, fmt"/files/{fileId}")
 
-proc retrieveFile*(apiConfig: OpenAi_Api; fileId: string): Response | Future[AsyncResponse] =
+proc retrieveFile*(apiConfig: OpenAi_Api; fileId: string): Response | Future[
+    AsyncResponse] =
   ## Returns information about a specific file.
   if apiConfig.isAsync:
     result = getAsync(apiConfig.asynchttpclient, fmt"/file/{fileId}")
@@ -314,7 +408,8 @@ proc downloadFile*(apiConfig: OpenAi_Api; fileId: string,
   let client = newAsyncHttpClient()
   result = httpclient.downloadFile(client, fmt"/file/{fileId}", saveToFileName)
 
-proc createAnswer*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
+proc createAnswer*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[
+    AsyncResponse] =
   ## Answers the specified question using the provided documents and examples.
   ## The endpoint first [searches](/docs/api-reference/searches) over provided documents or files to find relevant context.
   ##  The relevant context is combined with the provided examples and question to create the prompt for [completion](/docs/api-reference/completions).
@@ -336,7 +431,7 @@ proc createClassifications*(apiConfig: OpenAi_Api;
   ##
   ## Labeled examples can be provided via an uploaded `file`, or explicitly listed in the
   ## request using the `examples` parameter for quick tests and small scale use cases.
-  
+
   if apiConfig.isAsync:
     apiConfig.asynchttpClient.headers["content"] = "application/json"
     result = postAsync(apiConfig.asynchttpClient, "/classifications", $(%body))
@@ -344,7 +439,8 @@ proc createClassifications*(apiConfig: OpenAi_Api;
     apiConfig.httpClient.headers["content"] = "application/json"
     result = postSync(apiConfig.httpClient, "/classifications", $(%body))
 
-proc createFineTune*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[AsyncResponse] =
+proc createFineTune*(apiConfig: OpenAi_Api; body: JsonNode): Response | Future[
+    AsyncResponse] =
   ##  Creates a job that fine-tunes a specified model from a given dataset.
   ##
   ##  Response includes details of the enqueued job including job status and the name of the fine-tuned models once complete.
@@ -370,29 +466,36 @@ proc listFineTunes*(apiConfig: OpenAi_Api): Response | Future[AsyncResponse] =
   else:
     result = getSync(apiConfig.httpClient, "/fine-tunes")
 
-proc retrieveFineTune*(apiConfig: OpenAi_Api; fineTuneId: string): Response | Future[AsyncResponse] =
+proc retrieveFineTune*(apiConfig: OpenAi_Api; fineTuneId: string): Response |
+    Future[AsyncResponse] =
   ## Gets info about the fine-tune job.
   ##
   ## [Learn more about Fine-tuning](/docs/guides/fine-tuning)
-  
+
   if apiConfig.isAsync:
     result = getAsync(apiConfig.asynchttpclient, fmt"/fine-tunes/{fineTuneId}")
   else:
     result = getSync(apiConfig.httpClient, fmt"/fine-tunes/{fineTuneId}")
 
-proc cancelFineTune*(apiConfig: OpenAi_Api; fineTuneId: string): Response | Future[AsyncResponse] =
+proc cancelFineTune*(apiConfig: OpenAi_Api; fineTuneId: string): Response |
+    Future[AsyncResponse] =
   ## Immediately cancel a fine-tune job.
   if apiConfig.isAsync:
-    result = postAsync(apiConfig.asynchttpClient, fmt"/fines-tunes/{fineTuneId}/cancel")
+    result = postAsync(apiConfig.asynchttpClient,
+        fmt"/fines-tunes/{fineTuneId}/cancel")
   else:
-    result = postSync(apiConfig.httpClient, fmt"/fines-tunes/{fineTuneId}/cancel")
+    result = postSync(apiConfig.httpClient,
+        fmt"/fines-tunes/{fineTuneId}/cancel")
 
-proc listFineTuneEvents*(apiConfig: OpenAi_Api; fineTuneId: string): Response | Future[AsyncResponse] =
+proc listFineTuneEvents*(apiConfig: OpenAi_Api; fineTuneId: string): Response |
+    Future[AsyncResponse] =
   ## Get fine-grained status updates for a fine-tune job.
   if apiConfig.isAsync:
-    result = getAsync(apiConfig.asynchttpclient, fmt"/fines-tunes/{fineTuneId}/events")
+    result = getAsync(apiConfig.asynchttpclient,
+        fmt"/fines-tunes/{fineTuneId}/events")
   else:
-    result = getSync(apiConfig.httpClient, fmt"/fines-tunes/{fineTuneId}/events")
+    result = getSync(apiConfig.httpClient,
+        fmt"/fines-tunes/{fineTuneId}/events")
 
 proc listModels*(apiConfig: OpenAi_Api): Response | Future[AsyncResponse] =
   ## Lists the currently available models, and provides basic information about each one such as the owner and availability.
@@ -401,14 +504,16 @@ proc listModels*(apiConfig: OpenAi_Api): Response | Future[AsyncResponse] =
   else:
     result = getSync(apiConfig.httpClient, "/models")
 
-proc retrieveModel*(apiConfig: OpenAi_Api; model: string): Response | Future[AsyncResponse] =
+proc retrieveModel*(apiConfig: OpenAi_Api; model: string): Response | Future[
+    AsyncResponse] =
   ## Retrieves a model instance, providing basic information about the model such as the owner and permissioning.
   if apiConfig.isAsync:
     result = getAsync(apiConfig.asynchttpclient, fmt"/models/{model}")
   else:
     result = getSync(apiConfig.httpClient, fmt"/models/{model}")
 
-proc deleteModel*(apiConfig: OpenAi_Api; model: string): Response | Future[AsyncResponse] =
+proc deleteModel*(apiConfig: OpenAi_Api; model: string): Response | Future[
+    AsyncResponse] =
   ## Delete a fine-tuned model. You must have the Owner role in your organization.
   if apiConfig.isAsync:
     result = deleteAsync(apiConfig.asynchttpClient, fmt"/models/{model}")

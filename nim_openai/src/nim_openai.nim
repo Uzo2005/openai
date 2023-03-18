@@ -108,3 +108,5 @@ template makeRequestProc(procName, procType: untyped; requiredParams, optionalPa
 
 makeRequestProc(makea, Ca, @["model", "stop", "log_probs"], @["messages", "input"])
 makeRequestProc(makeb, Cb, @["model", "stop", "log_probs"], @["messages", "input"])
+
+echo $makea(params).type == "Ca"
