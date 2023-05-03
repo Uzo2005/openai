@@ -2,7 +2,7 @@
 
 version       = "0.1.0"
 author        = "Cletus"
-description   = "Openai API client In Nim"
+description   = "Openai API client For Nim"
 license       = "MIT"
 srcDir        = "src"
 

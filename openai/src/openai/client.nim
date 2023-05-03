@@ -7,14 +7,13 @@
       version: '1.2.0'
 ]#
 
-#TODO: Make 1024x1024 to escape properly, then impplement multipart data for all who needs it!
 
 import std/[tables, parsecfg, streams]
 
 type
-  Env* = object
+  Env = object
     data: OrderedTableRef[string, string]
-  EnvWrongFormatError* = object of CatchableError
+  EnvWrongFormatError = object of CatchableError
 
 func initEnv(): Env {.inline.} =
   ## Initializes an `Env`.
@@ -55,7 +54,7 @@ type
     API_KEY: string
     organization: string
     client: HttpClient
-  Async_OpenAi_Client = ref object
+  Async_OpenAi_Client* = ref object
     API_KEY: string
     organization: string
     client: AsyncHttpClient
@@ -84,8 +83,7 @@ template postToOpenAi(client: HttpClient | AsyncHttpClient;
 template deleteFromOpenAi(client: HttpClient | AsyncHttpClient;
     relativePath: string): untyped = delete(client, OpenAI_BASEURL & relativePath)
 
-
-template makeRequestProc(procName, procType: untyped; requiredParams,
+template verifyRequestParams(procName, procType: untyped; requiredParams,
     optionalParams: seq[string]): untyped =
   proc `procName`(body: JsonNode): `procType` =
     result = %*{}
@@ -108,6 +106,7 @@ template makeRequestProc(procName, procType: untyped; requiredParams,
       echo omittedRequiredParams, " is a required Parameter in the ",
           `procType`, " schema but has not been provided"
       quit(1)
+
 
 type
   CompletionRequest = JsonNode
@@ -140,58 +139,69 @@ type
 
   ModerationRequest = JsonNode
 
-makeRequestProc(parseCompletionRequest, CompletionRequest, @["model"], @[
+verifyRequestParams(parseCompletionRequest, CompletionRequest, @["model"], @[
     "prompt", "suffix", "max_tokens", "temperature", "top_p", "n", "stream",
     "logprobs", "echo", "stop", "presence_penalty", "frequency_penalty",
     "best_of", "logit_bias", "user"])
 
-makeRequestProc(parseChatCompletionRequest, ChatCompletionRequest, @["model",
+verifyRequestParams(parseChatCompletionRequest, ChatCompletionRequest, @["model",
     "messages"], @["temperature", "top_p", "n", "stream", "stop", "max_tokens",
         "presence_penalty", "frequency_penalty", "logit_bias"])
 
-makeRequestProc(parseEditRequest, EditRequest, @["model", "instruction"], @[
+verifyRequestParams(parseEditRequest, EditRequest, @["model", "instruction"], @[
     "instruction", "n", "temperature", "top_p"])
 
-makeRequestProc(parseImageRequest, ImageRequest, @["prompt"], @["n", "size",
+verifyRequestParams(parseImageRequest, ImageRequest, @["prompt"], @["n", "size",
     "response_format", "user"])
 
-makeRequestProc(parseImageEditRequest, ImageEditRequest, @["prompt", "image"],
+verifyRequestParams(parseImageEditRequest, ImageEditRequest, @["prompt", "image"],
     @["mask", "n", "size", "response_format", "user"])
 
-makeRequestProc(parseImageVariationRequest, ImageVariationRequest, @["image"],
+verifyRequestParams(parseImageVariationRequest, ImageVariationRequest, @["image"],
     @["n", "size", "response_format", "user"])
 
-makeRequestProc(parseModerationRequest, ModerationRequest, @["input"], @["model"])
+verifyRequestParams(parseModerationRequest, ModerationRequest, @["input"], @["model"])
 
-makeRequestProc(parseSearchRequest, SearchRequest, @["query"], @["documents",
+verifyRequestParams(parseSearchRequest, SearchRequest, @["query"], @["documents",
     "file", "max_rerank", "user"])
 
-makeRequestProc(parseFileRequest, FileRequest, @["file", "purpose"], @[
+verifyRequestParams(parseFileRequest, FileRequest, @["file", "purpose"], @[
     "empty"]) #the empty optionalParams is just so the compiler will shut up
 
-makeRequestProc(parseAnswerRequest, AnswerRequest, @["model", "question",
+verifyRequestParams(parseAnswerRequest, AnswerRequest, @["model", "question",
     "examples", "examples_context"], @["documents", "file", "search_model",
         "max_rerank", "temperature", "logprobs", "max_tokens", "stop", "n",
         "logit_bias", "return_metadata", "return_prompt", "expand", "user"])
 
-makeRequestProc(parseClassificationRequest, ClassificationRequest, @["model",
+verifyRequestParams(parseClassificationRequest, ClassificationRequest, @["model",
     "query"], @["examples", "file", "labels", "search_model", "temperature",
         "logprobs", "max_examples", "logit_bias", "return_prompt",
         "return_metadata", "expand", "user"])
 
-makeRequestProc(parseFineTuneRequest, FineTuneRequest, @["training_file"], @[
+verifyRequestParams(parseFineTuneRequest, FineTuneRequest, @["training_file"], @[
     "validation_file", "model", "n_epochs", "batch_size",
     "learning_rate_multiplier", "prompt_loss_weight",
     "compute_classification_metrics", "classification_n_classes",
     "classification_positive_class", "classification_betas", "suffix"])
 
-makeRequestProc(parseEmbeddingRequest, EmbeddingRequest, @["model", "input"], @["user"])
+verifyRequestParams(parseEmbeddingRequest, EmbeddingRequest, @["model", "input"], @["user"])
 
-makeRequestProc(parseTranscriptionRequest, TranscriptionRequest, @["file",
+verifyRequestParams(parseTranscriptionRequest, TranscriptionRequest, @["file",
     "model"], @["prompt", "response_format", "temperature", "language"])
 
-makeRequestProc(parseTranslationRequest, TranslationRequest, @["file",
+verifyRequestParams(parseTranslationRequest, TranslationRequest, @["file",
     "model"], @["prompt", "response_format", "temperature"])
+
+func removeQuotationMarks(s: string): string = s[1..^2]
+
+import strutils
+
+func removeEscapeSlashes(s: string): string =
+  for c in s:
+    if c.isAlphanumeric() or c.isSpaceAscii():
+      result.add(c)
+    else:
+      discard
 
 
 proc createMultiPartData(body: JsonNode, parseBody: proc(body: JsonNode): JsonNode, multipartFields: openArray[string]): MultipartData =
@@ -200,13 +210,12 @@ proc createMultiPartData(body: JsonNode, parseBody: proc(body: JsonNode): JsonNo
     multipartBody = newMultipartData()
 
   for key in verifiedBody.keys:
-      if key in multipartFields:
-        let data = ($verifiedBody[key])[1..^2]
-        multipartBody.addFiles([(key, data)])  
-      else:
-        multipartBody[key] = $verifiedBody[key]
+    if key in multipartFields:
+      let fileName = ($verifiedBody[key]).removeQuotationMarks()
+      multipartBody.addFiles([(key, fileName)])  
+    else:
+      multipartBody[key] = ($verifiedBody[key]).removeEscapeSlashes()
   result = multipartBody
-
 
 
 proc createCompletion*(apiConfig: OpenAi_Client | Async_OpenAi_Client;

@@ -1,6 +1,5 @@
-import nim_openai/[client]
-import httpclient, asyncdispatch, streams, json
-import jsony
+import openai
+import httpclient, json
 
 template Json(body: untyped): untyped = `%*`(body)
 
@@ -10,7 +9,6 @@ let
     openai = newOpenAiClient(api_key = api_key)
 
 
-let a = "512x512"
 let baz = Json {"image": "pic.png", "mask": "pic.png", "prompt": "A Nice Tesla For Asiwaju", "n": 2,
         "size": "512x512"}
 
@@ -28,6 +26,8 @@ echo foo.body()
 # let foo = await openai.listmodels()
 
 # echo foo
+
+
 
 
 
