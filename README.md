@@ -12,8 +12,9 @@ This is a simple implementation of a Nim lang client for the openai api spec (as
         env = loadEnv(".env")
         apiKey = env.get("API_KEY")
         openai = newOpenAiClient(apikey = apikey)
-## if you need to use an asynchronous client then use 
-    let openai = newAsyncOpenAiClient(apikey = apikey)
+## if you need to use an asynchronous client then:
+    ##import asyncdispatch
+    ##let openai = newAsyncOpenAiClient(apikey = apikey)
 
 ```
 
