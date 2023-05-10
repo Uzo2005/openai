@@ -85,7 +85,14 @@ template deleteFromOpenAi(client: HttpClient | AsyncHttpClient;
 
 template verifyRequestParams(procName, procType: untyped; requiredParams,
     optionalParams: seq[string]): untyped =
+
+  ## The parameter verifications will only be done in development mode, to help speed up production code
+  ##
   proc `procName`(body: JsonNode): `procType` =
+
+    when defined(release):
+      return body
+
     result = %*{}
     var 
       required = toHashSet(`requiredParams`)
@@ -205,6 +212,8 @@ func removeEscapeSlashes(s: string): string =
 
 
 proc createMultiPartData(body: JsonNode, parseBody: proc(body: JsonNode): JsonNode, multipartFields: openArray[string]): MultipartData =
+  ## Procedure to make creating multipart/form-data content-types easier
+  ## 
   let 
     verifiedBody = parseBody(body)
     multipartBody = newMultipartData()
@@ -221,6 +230,7 @@ proc createMultiPartData(body: JsonNode, parseBody: proc(body: JsonNode): JsonNo
 proc createCompletion*(apiConfig: OpenAi_Client | Async_OpenAi_Client;
     body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
   ## Creates a completion for the provided prompt and parameters
+  
   let verifiedBody = parseCompletionRequest(body)
   apiConfig.client.headers["Content-Type"] = "application/json"
   result = await postToOpenAi(apiConfig.client, "/completions", $verifiedBody)
