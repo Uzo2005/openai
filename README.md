@@ -1,6 +1,13 @@
 ### OpenAI api client for Nim Lang
 This is a simple implementation of a Nim lang client for the openai api spec (as found in the spec.yaml file above). This client has support for asynchronous requests and parameters are passed as json.
 
+
+### Installation
+
+```console
+nimble install openaiclient
+```
+
 ### Usage
 
 [1] Create a file to hold your apikeys and other environmental variables and construct a new openai client 
