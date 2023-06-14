@@ -152,7 +152,7 @@ verifyRequestParams(parseCompletionRequest, CompletionRequest, @["model"], @[
     "best_of", "logit_bias", "user"])
 
 verifyRequestParams(parseChatCompletionRequest, ChatCompletionRequest, @["model",
-    "messages"], @["temperature", "top_p", "n", "stream", "stop", "max_tokens",
+    "messages"], @["functions", "function_call", "temperature", "top_p", "n", "stream", "stop", "max_tokens",
         "presence_penalty", "frequency_penalty", "logit_bias"])
 
 verifyRequestParams(parseEditRequest, EditRequest, @["model", "instruction"], @[
