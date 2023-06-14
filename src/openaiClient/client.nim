@@ -4,7 +4,7 @@
     info:
       title: OpenAI API
       description: APIs for sampling from and fine-tuning language models
-      version: '1.2.0'
+      version: '1.3.0'
 ]#
 
 

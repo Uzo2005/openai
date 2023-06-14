@@ -5,7 +5,7 @@ This is a simple implementation of a Nim lang client for the openai api spec (as
 ### Installation
 
 ```console
-nimble install openaiclient
+nimble install openaiclient         
 ```
 
 ### Usage
