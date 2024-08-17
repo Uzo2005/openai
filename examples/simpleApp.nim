@@ -1,16 +1,21 @@
-import openai
+import openaiClient
 import httpclient, json
 
-template Json(body: untyped): untyped = `%*`(body)
+template Json(body: untyped): untyped =
+    `%*`(body)
 
 let
     env = loadEnvFile(".env")
     api_key = env.get("API_KEY")
     openai = newOpenAiClient(api_key = api_key)
 
-
-let baz = Json {"image": "pic.png", "mask": "pic.png", "prompt": "A Nice Tesla For Asiwaju", "n": 2,
-        "size": "512x512"}
+let baz = Json {
+    "image": "pic.png",
+    "mask": "pic.png",
+    "prompt": "A Nice Tesla For Asiwaju",
+    "n": 2,
+    "size": "512x512",
+}
 
 let foo = openai.createImageEdit(baz)
 echo foo.body()
@@ -26,8 +31,3 @@ echo foo.body()
 # let foo = await openai.listmodels()
 
 # echo foo
-
-
-
-
-

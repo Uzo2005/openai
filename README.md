@@ -1,21 +1,21 @@
 ### OpenAI api client for Nim Lang
-This is a simple implementation of a Nim lang client for the openai api spec (as found in the spec.yaml file above). This client has support for asynchronous requests and parameters are passed as json.
 
+This is a simple implementation of a Nim lang client for the openai api spec (as found in the spec.yaml file above). This client has support for asynchronous requests and parameters are passed as json.
 
 ### Installation
 
 ```console
-nimble install openaiclient         
+nimble install openaiclient
 ```
 
 ### Usage
 
-[1] Create a file to hold your apikeys and other environmental variables and construct a new openai client 
+[1] Create a file to hold your apikeys and other environmental variables and construct a new openai client
 
 ```nim
-import openai
+import openaiClient
 
-let 
+let
     env = loadEnv(".env")
     apiKey = env.get("API_KEY")
     openai = newOpenAiClient(apikey = apikey)
@@ -41,4 +41,5 @@ echo imageEditResponse
 ```
 
 ### Contributions
+
 Contributions to the OpenAI Nim client are welcome. If you find a bug or have a suggestion for a new feature, please open an issue on the GitHub repository. If you would like to contribute code, please fork the repository and submit a pull request.
