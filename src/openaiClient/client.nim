@@ -7,412 +7,536 @@
       version: '1.3.0'
 ]#
 
-
 import std/[tables, parsecfg, streams]
 
 type
-  Env = object
-    data: OrderedTableRef[string, string]
-  EnvWrongFormatError = object of CatchableError
+    Env = object
+        data: OrderedTableRef[string, string]
+
+    EnvWrongFormatError = object of CatchableError
 
 func initEnv(): Env {.inline.} =
-  ## Initializes an `Env`.
-  Env(data: newOrderedTable[string, string]())
+    ## Initializes an `Env`.
+    Env(data: newOrderedTable[string, string]())
 
 func get*(env: Env, key: string): string {.inline.} =
-  ## Retrieves a value of `key` in `Env`.
-  result = env.data[key]
+    ## Retrieves a value of `key` in `Env`.
+    result = env.data[key]
 
 proc loadEnvFile*(filename: string): Env =
-  ##loads the env file
-  result = initEnv()
-  var f = newFileStream(filename, fmRead)
+    ##loads the env file
+    result = initEnv()
+    var f = newFileStream(filename, fmRead)
 
-  if f != nil:
-    var p: CfgParser
-    open(p, f, filename)
-    while true:
-      var e = p.next
-      case e.kind
-        of cfgEof:
-          break
-        of cfgKeyValuePair:
-          result.data[e.key] = e.value
-        else:
-          raise newException(EnvWrongFormatError, ".env files only support key-value pairs")
-    f.close()
-    p.close()
+    if f != nil:
+        var p: CfgParser
+        open(p, f, filename)
+        while true:
+            var e = p.next
+            case e.kind
+            of cfgEof:
+                break
+            of cfgKeyValuePair:
+                result.data[e.key] = e.value
+            else:
+                raise newException(
+                    EnvWrongFormatError, ".env files only support key-value pairs"
+                )
+        f.close()
+        p.close()
 
 import std/[httpclient, asyncdispatch, json, strformat, sets]
 
-
-const
-  OpenAI_BASEURL* = "https://api.openai.com/v1"
+const OpenAI_BASEURL* = "https://api.openai.com/v1"
 
 type
-  OpenAi_Client* = ref object
-    API_KEY: string
-    organization: string
-    client: HttpClient
-  Async_OpenAi_Client* = ref object
-    API_KEY: string
-    organization: string
-    client: AsyncHttpClient
+    OpenAi_Client* = ref object
+        API_KEY: string
+        organization: string
+        client: HttpClient
+
+    Async_OpenAi_Client* = ref object
+        API_KEY: string
+        organization: string
+        client: AsyncHttpClient
 
 proc defaultHeader(api_key, organization: string): HttpHeaders =
-  if organization != "": 
-    result = newHttpHeaders([("Authorization", fmt"Bearer {api_key}"), ("OpenAI_Organization", organization)])
-  else:
-    result = newHttpHeaders([("Authorization", fmt"Bearer {api_key}")])
+    if organization != "":
+        result = newHttpHeaders(
+            [
+                ("Authorization", fmt"Bearer {api_key}"),
+                ("OpenAI_Organization", organization),
+            ]
+        )
+    else:
+        result = newHttpHeaders([("Authorization", fmt"Bearer {api_key}")])
 
 proc newOpenAiClient*(api_key: string, organization = ""): OpenAi_Client =
-  result = OpenAi_Client(API_KEY: api_key,
-      client: newHttpClient(headers = defaultHeader(api_key, organization)))
+    result = OpenAi_Client(
+        API_KEY: api_key,
+        client: newHttpClient(headers = defaultHeader(api_key, organization)),
+    )
 
 proc newAsyncOpenAiClient*(api_key: string, organization = ""): Async_OpenAi_Client =
-  result = Async_OpenAi_Client(API_KEY: api_key,
-      client: newAsyncHttpClient(headers = defaultHeader(api_key, organization)))
+    result = Async_OpenAi_Client(
+        API_KEY: api_key,
+        client: newAsyncHttpClient(headers = defaultHeader(api_key, organization)),
+    )
 
-template getFromOpenAi(client: HttpClient | AsyncHttpClient;
-    relativePath: string): untyped = get(client, OpenAI_BASEURL & relativePath)
+template getFromOpenAi(
+        client: HttpClient | AsyncHttpClient, relativePath: string
+): untyped =
+    get(client, OpenAI_BASEURL & relativePath)
 
-template postToOpenAi(client: HttpClient | AsyncHttpClient;
-    relativePath: string, requestBody: string = "", multipart: MultipartData = nil): untyped = post(client,
-        OpenAI_BASEURL & relativePath, requestBody, multipart)
+template postToOpenAi(
+        client: HttpClient | AsyncHttpClient,
+        relativePath: string,
+        requestBody: string = "",
+        multipart: MultipartData = nil,
+): untyped =
+    post(client, OpenAI_BASEURL & relativePath, requestBody, multipart)
 
-template deleteFromOpenAi(client: HttpClient | AsyncHttpClient;
-    relativePath: string): untyped = delete(client, OpenAI_BASEURL & relativePath)
+template deleteFromOpenAi(
+        client: HttpClient | AsyncHttpClient, relativePath: string
+): untyped =
+    delete(client, OpenAI_BASEURL & relativePath)
 
-template verifyRequestParams(procName, procType: untyped; requiredParams,
-    optionalParams: seq[string]): untyped =
+template verifyRequestParams(
+        procName, procType: untyped, requiredParams, optionalParams: seq[string]
+): untyped =
+    ## The parameter verifications will only be done in development mode, to help speed up production code
+    ##
+    proc `procName`(body: JsonNode): `procType` =
+        when defined(release):
+            return body
 
-  ## The parameter verifications will only be done in development mode, to help speed up production code
-  ##
-  proc `procName`(body: JsonNode): `procType` =
+        result = %*{}
+        var
+            required = toHashSet(`requiredParams`)
+            optional = toHashSet(`optionalParams`)
+            allPossibleParams = required + optional
 
-    when defined(release):
-      return body
+        for key in body.keys:
+            if key in allPossibleParams:
+                allPossibleParams.excl(key)
+                result[key] = body[key]
+            else:
+                echo key, " is not a valid key in the ", `procType`, " schema"
+                quit(1)
 
-    result = %*{}
-    var 
-      required = toHashSet(`requiredParams`)
-      optional = toHashSet(`optionalParams`)
-      allPossibleParams = required + optional
+        let omittedRequiredParams = allPossibleParams - optional
 
-    for key in body.keys:
-      if key in allPossibleParams:
-        allPossibleParams.excl(key)
-        result[key] = body[key]
-      else:
-        echo key, " is not a valid key in the ", `procType`, " schema"
-        quit(1)
-
-    let omittedRequiredParams = allPossibleParams - optional
-
-    if omittedRequiredParams.len > 0:
-      echo omittedRequiredParams, " is a required Parameter in the ",
-          `procType`, " schema but has not been provided"
-      quit(1)
-
+        if omittedRequiredParams.len > 0:
+            echo omittedRequiredParams,
+                " is a required Parameter in the ", `procType`,
+                " schema but has not been provided"
+            quit(1)
 
 type
-  CompletionRequest = JsonNode
+    CompletionRequest = JsonNode
 
-  ChatCompletionRequest = JsonNode
+    ChatCompletionRequest = JsonNode
 
-  EditRequest = JsonNode
+    EditRequest = JsonNode
 
-  ImageRequest = JsonNode
+    ImageRequest = JsonNode
 
-  ImageEditRequest = JsonNode
+    ImageEditRequest = JsonNode
 
-  ImageVariationRequest = JsonNode
+    ImageVariationRequest = JsonNode
 
-  EmbeddingRequest = JsonNode
+    EmbeddingRequest = JsonNode
 
-  TranscriptionRequest = JsonNode
+    TranscriptionRequest = JsonNode
 
-  TranslationRequest = JsonNode
+    TranslationRequest = JsonNode
 
-  SearchRequest = JsonNode
+    SearchRequest = JsonNode
 
-  FileRequest = JsonNode
+    FileRequest = JsonNode
 
-  AnswerRequest = JsonNode
+    AnswerRequest = JsonNode
 
-  ClassificationRequest = JsonNode
+    ClassificationRequest = JsonNode
 
-  FineTuneRequest = JsonNode
+    FineTuneRequest = JsonNode
 
-  ModerationRequest = JsonNode
+    ModerationRequest = JsonNode
 
-verifyRequestParams(parseCompletionRequest, CompletionRequest, @["model"], @[
-    "prompt", "suffix", "max_tokens", "temperature", "top_p", "n", "stream",
-    "logprobs", "echo", "stop", "presence_penalty", "frequency_penalty",
-    "best_of", "logit_bias", "user"])
+verifyRequestParams(
+    parseCompletionRequest,
+    CompletionRequest,
+    @["model"],
+    @[
+        "prompt", "suffix", "max_tokens", "temperature", "top_p", "n", "stream",
+        "logprobs", "echo", "stop", "presence_penalty", "frequency_penalty", "best_of",
+        "logit_bias", "user",
+    ],
+)
 
-verifyRequestParams(parseChatCompletionRequest, ChatCompletionRequest, @["model",
-    "messages"], @["functions", "function_call", "temperature", "top_p", "n", "stream", "stop", "max_tokens",
-        "presence_penalty", "frequency_penalty", "logit_bias"])
+verifyRequestParams(
+    parseChatCompletionRequest,
+    ChatCompletionRequest,
+    @["model", "messages"],
+    @[
+        "functions", "function_call", "temperature", "top_p", "n", "stream", "stop",
+        "max_tokens", "presence_penalty", "frequency_penalty", "logit_bias",
+    ],
+)
 
-verifyRequestParams(parseEditRequest, EditRequest, @["model", "instruction"], @[
-    "instruction", "n", "temperature", "top_p"])
+verifyRequestParams(
+    parseEditRequest,
+    EditRequest,
+    @["model", "instruction"],
+    @["instruction", "n", "temperature", "top_p"],
+)
 
-verifyRequestParams(parseImageRequest, ImageRequest, @["prompt"], @["n", "size",
-    "response_format", "user"])
+verifyRequestParams(
+    parseImageRequest,
+    ImageRequest,
+    @["prompt"],
+    @["n", "size", "response_format", "user"],
+)
 
-verifyRequestParams(parseImageEditRequest, ImageEditRequest, @["prompt", "image"],
-    @["mask", "n", "size", "response_format", "user"])
+verifyRequestParams(
+    parseImageEditRequest,
+    ImageEditRequest,
+    @["prompt", "image"],
+    @["mask", "n", "size", "response_format", "user"],
+)
 
-verifyRequestParams(parseImageVariationRequest, ImageVariationRequest, @["image"],
-    @["n", "size", "response_format", "user"])
+verifyRequestParams(
+    parseImageVariationRequest,
+    ImageVariationRequest,
+    @["image"],
+    @["n", "size", "response_format", "user"],
+)
 
 verifyRequestParams(parseModerationRequest, ModerationRequest, @["input"], @["model"])
 
-verifyRequestParams(parseSearchRequest, SearchRequest, @["query"], @["documents",
-    "file", "max_rerank", "user"])
+verifyRequestParams(
+    parseSearchRequest,
+    SearchRequest,
+    @["query"],
+    @["documents", "file", "max_rerank", "user"],
+)
 
-verifyRequestParams(parseFileRequest, FileRequest, @["file", "purpose"], @[
-    "empty"]) #the empty optionalParams is just so the compiler will shut up
+verifyRequestParams(parseFileRequest, FileRequest, @["file", "purpose"], @["empty"])
+    #the empty optionalParams is just so the compiler will shut up
 
-verifyRequestParams(parseAnswerRequest, AnswerRequest, @["model", "question",
-    "examples", "examples_context"], @["documents", "file", "search_model",
-        "max_rerank", "temperature", "logprobs", "max_tokens", "stop", "n",
-        "logit_bias", "return_metadata", "return_prompt", "expand", "user"])
+verifyRequestParams(
+    parseAnswerRequest,
+    AnswerRequest,
+    @["model", "question", "examples", "examples_context"],
+    @[
+        "documents", "file", "search_model", "max_rerank", "temperature", "logprobs",
+        "max_tokens", "stop", "n", "logit_bias", "return_metadata", "return_prompt",
+        "expand", "user",
+    ],
+)
 
-verifyRequestParams(parseClassificationRequest, ClassificationRequest, @["model",
-    "query"], @["examples", "file", "labels", "search_model", "temperature",
-        "logprobs", "max_examples", "logit_bias", "return_prompt",
-        "return_metadata", "expand", "user"])
+verifyRequestParams(
+    parseClassificationRequest,
+    ClassificationRequest,
+    @["model", "query"],
+    @[
+        "examples", "file", "labels", "search_model", "temperature", "logprobs",
+        "max_examples", "logit_bias", "return_prompt", "return_metadata", "expand",
+        "user",
+    ],
+)
 
-verifyRequestParams(parseFineTuneRequest, FineTuneRequest, @["training_file"], @[
-    "validation_file", "model", "n_epochs", "batch_size",
-    "learning_rate_multiplier", "prompt_loss_weight",
-    "compute_classification_metrics", "classification_n_classes",
-    "classification_positive_class", "classification_betas", "suffix"])
+verifyRequestParams(
+    parseFineTuneRequest,
+    FineTuneRequest,
+    @["training_file"],
+    @[
+        "validation_file", "model", "n_epochs", "batch_size",
+        "learning_rate_multiplier", "prompt_loss_weight",
+        "compute_classification_metrics", "classification_n_classes",
+        "classification_positive_class", "classification_betas", "suffix",
+    ],
+)
 
-verifyRequestParams(parseEmbeddingRequest, EmbeddingRequest, @["model", "input"], @["user"])
+verifyRequestParams(
+    parseEmbeddingRequest, EmbeddingRequest, @["model", "input"], @["user"]
+)
 
-verifyRequestParams(parseTranscriptionRequest, TranscriptionRequest, @["file",
-    "model"], @["prompt", "response_format", "temperature", "language"])
+verifyRequestParams(
+    parseTranscriptionRequest,
+    TranscriptionRequest,
+    @["file", "model"],
+    @["prompt", "response_format", "temperature", "language"],
+)
 
-verifyRequestParams(parseTranslationRequest, TranslationRequest, @["file",
-    "model"], @["prompt", "response_format", "temperature"])
+verifyRequestParams(
+    parseTranslationRequest,
+    TranslationRequest,
+    @["file", "model"],
+    @["prompt", "response_format", "temperature"],
+)
 
-func removeQuotationMarks(s: string): string = s[1..^2]
+proc createMultiPartData(
+        body: JsonNode,
+        parseBody: proc(body: JsonNode): JsonNode,
+        multipartFields: openArray[string],
+): MultipartData =
+    ## Procedure to make creating multipart/form-data content-types easier
+    ## 
+    let
+        verifiedBody = parseBody(body)
+        multipartBody = newMultipartData()
 
-import strutils
+    for key in verifiedBody.keys:
+        if key in multipartFields:
+            let fileName = verifiedBody[key].getStr()
+            multipartBody.addFiles([(key, fileName)])
+        else:
+            multipartBody[key] = verifiedBody[key].getStr()
+    result = multipartBody
 
-func removeEscapeSlashes(s: string): string =
-  for c in s:
-    if c.isAlphanumeric() or c.isSpaceAscii():
-      result.add(c)
-    else:
-      discard
+proc createCompletion*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Creates a completion for the provided prompt and parameters
 
+    let verifiedBody = parseCompletionRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/completions", $verifiedBody)
 
-proc createMultiPartData(body: JsonNode, parseBody: proc(body: JsonNode): JsonNode, multipartFields: openArray[string]): MultipartData =
-  ## Procedure to make creating multipart/form-data content-types easier
-  ## 
-  let 
-    verifiedBody = parseBody(body)
-    multipartBody = newMultipartData()
+proc createChatCompletion*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Creates a completion for the chat message
+    let verifiedBody = parseChatCompletionRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/chat/completions", $verifiedBody)
 
-  for key in verifiedBody.keys:
-    if key in multipartFields:
-      let fileName = ($verifiedBody[key]).removeQuotationMarks()
-      multipartBody.addFiles([(key, fileName)])  
-    else:
-      multipartBody[key] = ($verifiedBody[key]).removeEscapeSlashes()
-  result = multipartBody
+proc createEdit*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Creates a new edit for the provided input, instruction, and parameters.
+    let verifiedBody = parseEditRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/edits", $verifiedBody)
 
+proc createImage*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Creates an image given a prompt.
+    let verifiedBody = parseImageRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/images/generations", $verifiedbody)
 
-proc createCompletion*(apiConfig: OpenAi_Client | Async_OpenAi_Client;
-    body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Creates a completion for the provided prompt and parameters
-  
-  let verifiedBody = parseCompletionRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/completions", $verifiedBody)
+proc createImageEdit*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Creates an edited or extended image given an original image and a prompt.
 
+    apiConfig.client.headers["Content-Type"] = "multipart/form-data"
+    result = await postToOpenAi(
+        apiConfig.client,
+        "/images/edits",
+        multipart = createMultiPartData(body, parseImageEditRequest, ["image", "mask"]),
+    )
 
-proc createChatCompletion*(apiConfig: OpenAi_Client | Async_OpenAi_Client;
-    body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Creates a completion for the chat message
-  let verifiedBody = parseChatCompletionRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/chat/completions", $verifiedBody)
-  
-proc createEdit*(apiConfig: OpenAi_Client | Async_OpenAi_Client; body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Creates a new edit for the provided input, instruction, and parameters.
-  let verifiedBody = parseEditRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/edits", $verifiedBody)
-  
-proc createImage*(apiConfig: OpenAi_Client | Async_OpenAi_Client; body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Creates an image given a prompt.
-  let verifiedBody = parseImageRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/images/generations", $verifiedbody)
+proc createImageVariation*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Creates a variation of a given image.
 
+    apiConfig.client.headers["Content-Type"] = "multipart/form-data"
+    result = await postToOpenAi(
+        apiConfig.client,
+        "/images/variations",
+        multipart = createMultiPartData(body, parseImageVariationRequest, ["image"]),
+    )
 
-proc createImageEdit*(apiConfig: OpenAi_Client | Async_OpenAi_Client; body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Creates an edited or extended image given an original image and a prompt.
-  
-  apiConfig.client.headers["Content-Type"] = "multipart/form-data"
-  result = await postToOpenAi(apiConfig.client, "/images/edits", multipart = createMultiPartData(body, parseImageEditRequest, ["image", "mask"]))
+proc createEmbedding*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Creates an embedding vector representing the input text.
 
-proc createImageVariation*(apiConfig: OpenAi_Client | Async_OpenAi_Client;
-    body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Creates a variation of a given image.
-  
-  apiConfig.client.headers["Content-Type"] = "multipart/form-data"
-  result = await postToOpenAi(apiConfig.client, "/images/variations", multipart = createMultiPartData(body, parseImageVariationRequest, ["image"]))
+    let verifiedBody = parseEmbeddingRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/embeddings", $verifiedBody)
 
-proc createEmbedding*(apiConfig: OpenAi_Client | Async_OpenAi_Client; body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Creates an embedding vector representing the input text.
-  
-  let verifiedBody = parseEmbeddingRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/embeddings", $verifiedBody)
+proc createTranscription*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Transcribes audio into the input language.
 
-proc createTranscription*(apiConfig: OpenAi_Client | Async_OpenAi_Client;
-    body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Transcribes audio into the input language.
+    apiConfig.client.headers["Content-Type"] = "multipart/form-data"
+    result = await postToOpenAi(
+        apiConfig.client,
+        "/audio/transcriptions",
+        multipart = createMultiPartData(body, parseTranscriptionRequest, ["file"]),
+    )
 
-  apiConfig.client.headers["Content-Type"] = "multipart/form-data"
-  result = await postToOpenAi(apiConfig.client, "/audio/transcriptions", multipart = createMultiPartData(body, parseTranscriptionRequest, ["file"]))
+proc createTranslation*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Translates audio into into English.
 
-proc createTranslation*(apiConfig: OpenAi_Client | Async_OpenAi_Client;
-    body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Translates audio into into English.
-  
-  apiConfig.client.headers["Content-Type"] = "multipart/form-data"
-  result = await postToOpenAi(apiConfig.client, "/audio/translations", multipart = createMultiPartData(body, parseTranslationRequest, ["file"]))
-  
+    apiConfig.client.headers["Content-Type"] = "multipart/form-data"
+    result = await postToOpenAi(
+        apiConfig.client,
+        "/audio/translations",
+        multipart = createMultiPartData(body, parseTranslationRequest, ["file"]),
+    )
 
-proc createSearch*(apiConfig: OpenAi_Client | Async_OpenAi_Client; engineId: string,
-    body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## The search endpoint computes similarity scores between provided query and documents. Documents can be passed directly to the API if there are no more than 200 of them.
-  ##
-  ## To go beyond the 200 document limit, documents can be processed offline and then used for efficient retrieval at query time.
-  ##  When `file` is set, the search endpoint searches over all the documents in the given file and returns up to the `max_rerank` number of documents.
-  ##  These documents will be returned along with their search scores.
-  ##
-  ##  The similarity score is a positive score that usually ranges from 0 to 300 (but can sometimes go higher), where a score above 200 usually means the document is semantically similar to the query.
-  
-  let verifiedBody = parseSearchRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client,
-      fmt"/engines/{engineId}/search", $verifiedBody)
- 
+proc createSearch*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, engineId: string, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## The search endpoint computes similarity scores between provided query and documents. Documents can be passed directly to the API if there are no more than 200 of them.
+    ##
+    ## To go beyond the 200 document limit, documents can be processed offline and then used for efficient retrieval at query time.
+    ##  When `file` is set, the search endpoint searches over all the documents in the given file and returns up to the `max_rerank` number of documents.
+    ##  These documents will be returned along with their search scores.
+    ##
+    ##  The similarity score is a positive score that usually ranges from 0 to 300 (but can sometimes go higher), where a score above 200 usually means the document is semantically similar to the query.
 
-proc listFiles*(apiConfig: OpenAi_Client | Async_OpenAi_Client): Future[Response | AsyncResponse] {.multisync.} =
-  ## Returns a list of files that belong to the user's organization.
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await getFromOpenAi(apiConfig.client, "/files")
+    let verifiedBody = parseSearchRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(
+        apiConfig.client, fmt"/engines/{engineId}/search", $verifiedBody
+    )
 
-proc createFile*(apiConfig: OpenAi_Client | Async_OpenAi_Client; body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Upload a file that contains document(s) to be used across various endpoints/features.
-  ##  Currently, the size of all the files uploaded by one organization can be up to 1 GB.
-  ##  Please contact us if you need to increase the storage limit.
-  
-  apiConfig.client.headers["Content-Type"] = "multipart/form-data"
-  result = await postToOpenAi(apiConfig.client, "/file", multipart = createMultiPartData(body, parseFileRequest, ["file"]))
+proc listFiles*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Returns a list of files that belong to the user's organization.
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await getFromOpenAi(apiConfig.client, "/files")
 
+proc createFile*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Upload a file that contains document(s) to be used across various endpoints/features.
+    ##  Currently, the size of all the files uploaded by one organization can be up to 1 GB.
+    ##  Please contact us if you need to increase the storage limit.
 
-proc deleteFile*(apiConfig: OpenAi_Client | Async_OpenAi_Client; fileId: string): Future[Response | AsyncResponse] {.multisync.} =
-  ## Delete a file.
-  result = await deleteFromOpenAi(apiConfig.client, fmt"/files/{fileId}")
+    apiConfig.client.headers["Content-Type"] = "multipart/form-data"
+    result = await postToOpenAi(
+        apiConfig.client,
+        "/file",
+        multipart = createMultiPartData(body, parseFileRequest, ["file"]),
+    )
 
-proc retrieveFile*(apiConfig: OpenAi_Client | Async_OpenAi_Client; fileId: string): Future[Response | AsyncResponse] {.multisync.} =
-  ## Returns information about a specific file.
-  result = await getFromOpenAi(apiConfig.client, fmt"/file/{fileId}")
+proc deleteFile*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, fileId: string
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Delete a file.
+    result = await deleteFromOpenAi(apiConfig.client, fmt"/files/{fileId}")
 
-proc downloadFile*(apiConfig: OpenAi_Client | Async_OpenAi_Client; fileId: string,
-    saveToFileName = fileId): Future[void] =
-  ## Returns the contents of the specified file
-  result = await httpclient.downloadFile(apiConfig.client, fmt"/file/{fileId}", saveToFileName)
+proc retrieveFile*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, fileId: string
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Returns information about a specific file.
+    result = await getFromOpenAi(apiConfig.client, fmt"/file/{fileId}")
 
-proc createAnswer*(apiConfig: OpenAi_Client | Async_OpenAi_Client; body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Answers the specified question using the provided documents and examples.
-  ## The endpoint first [searches](/docs/api-reference/searches) over provided documents or files to find relevant context.
-  ##  The relevant context is combined with the provided examples and question to create the prompt for [completion](/docs/api-reference/completions).
-  
-  let verifiedBody = parseAnswerRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/answers", $verifiedBody)
-  
-proc createClassification*(apiConfig: OpenAi_Client | Async_OpenAi_Client;
-    body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Classifies the specified `query` using provided examples.
-  ##
-  ## The endpoint first [searches](/docs/api-reference/searches) over the labeled examples
-  ## to select the ones most relevant for the particular query. Then, the relevant examples
-  ## are combined with the query to construct a prompt to produce the final label via the
-  ## [completions](/docs/api-reference/completions) endpoint.
-  ##
-  ## Labeled examples can be provided via an uploaded `file`, or explicitly listed in the
-  ## request using the `examples` parameter for quick tests and small scale use cases.
-  
-  let verifiedBody = parseClassificationRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/classifications", $verifiedBody)
+proc downloadFile*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client,
+        fileId: string,
+        saveToFileName = fileId,
+): Future[void] =
+    ## Returns the contents of the specified file
+    result = await httpclient.downloadFile(
+        apiConfig.client, fmt"/file/{fileId}", saveToFileName
+    )
 
-proc createFineTune*(apiConfig: OpenAi_Client | Async_OpenAi_Client; body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ##  Creates a job that fine-tunes a specified model from a given dataset.
-  ##
-  ##  Response includes details of the enqueued job including job status and the name of the fine-tuned models once complete.
-  ##
-  ##  [Learn more about Fine-tuning](/docs/guides/fine-tuning)
-  
-  let verifiedBody = parseFineTuneRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/fine-tunes", $verifiedBody)
+proc createAnswer*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Answers the specified question using the provided documents and examples.
+    ## The endpoint first [searches](/docs/api-reference/searches) over provided documents or files to find relevant context.
+    ##  The relevant context is combined with the provided examples and question to create the prompt for [completion](/docs/api-reference/completions).
 
-proc listFineTunes*(apiConfig: OpenAi_Client | Async_OpenAi_Client): Future[Response | AsyncResponse] {.multisync.} =
-  ## List your organization's fine-tuning jobs
-  
-  result = await getFromOpenAi(apiConfig.client, "/fine-tunes")
+    let verifiedBody = parseAnswerRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/answers", $verifiedBody)
 
-proc retrieveFineTune*(apiConfig: OpenAi_Client | Async_OpenAi_Client; fineTuneId: string): Response |
-    Future[AsyncResponse] =
-  ## Gets info about the fine-tune job.
-  ##
-  ## [Learn more about Fine-tuning](/docs/guides/fine-tuning)
+proc createClassification*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Classifies the specified `query` using provided examples.
+    ##
+    ## The endpoint first [searches](/docs/api-reference/searches) over the labeled examples
+    ## to select the ones most relevant for the particular query. Then, the relevant examples
+    ## are combined with the query to construct a prompt to produce the final label via the
+    ## [completions](/docs/api-reference/completions) endpoint.
+    ##
+    ## Labeled examples can be provided via an uploaded `file`, or explicitly listed in the
+    ## request using the `examples` parameter for quick tests and small scale use cases.
 
-  result = await getFromOpenAi(apiConfig.client,
-      fmt"/fine-tunes/{fineTuneId}")
+    let verifiedBody = parseClassificationRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/classifications", $verifiedBody)
 
-proc cancelFineTune*(apiConfig: OpenAi_Client | Async_OpenAi_Client; fineTuneId: string): Response |
-    Future[AsyncResponse] =
-  ## Immediately cancel a fine-tune job.
-  result = await postToOpenAi(apiConfig.client,
-      fmt"/fines-tunes/{fineTuneId}/cancel")
+proc createFineTune*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ##  Creates a job that fine-tunes a specified model from a given dataset.
+    ##
+    ##  Response includes details of the enqueued job including job status and the name of the fine-tuned models once complete.
+    ##
+    ##  [Learn more about Fine-tuning](/docs/guides/fine-tuning)
 
-proc listFineTuneEvents*(apiConfig: OpenAi_Client | Async_OpenAi_Client; fineTuneId: string): Response |
-    Future[AsyncResponse] =
-  ## Get fine-grained status updates for a fine-tune job.
-  result = await getFromOpenAi(apiConfig.client,
-      fmt"/fines-tunes/{fineTuneId}/events")
+    let verifiedBody = parseFineTuneRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/fine-tunes", $verifiedBody)
 
-proc listModels*(apiConfig: OpenAi_Client | Async_OpenAi_Client): Future[Response |
-    AsyncResponse] {.multisync.} =
-  ## Lists the currently available models, and provides basic information about each one such as the owner and availability.
-  result = await getFromOpenAi(apiConfig.client, "/models")
-  
+proc listFineTunes*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## List your organization's fine-tuning jobs
 
-proc retrieveModel*(apiConfig: OpenAi_Client | Async_OpenAi_Client; model: string): Future[Response | AsyncResponse] {.multisync.} =
-  ## Retrieves a model instance, providing basic information about the model such as the owner and permissioning.
-  result = await getFromOpenAi(apiConfig.client, fmt"/models/{model}")
+    result = await getFromOpenAi(apiConfig.client, "/fine-tunes")
 
-proc deleteModel*(apiConfig: OpenAi_Client | Async_OpenAi_Client; model: string): Future[Response | AsyncResponse] {.multisync.} =
-  ## Delete a fine-tuned model. You must have the Owner role in your organization.
-  result = await deleteFromOpenAi(apiConfig.client, fmt"/models/{model}")
+proc retrieveFineTune*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, fineTuneId: string
+): Response | Future[AsyncResponse] =
+    ## Gets info about the fine-tune job.
+    ##
+    ## [Learn more about Fine-tuning](/docs/guides/fine-tuning)
 
-proc createModeration*(apiConfig: OpenAi_Client | Async_OpenAi_Client;
-    body: JsonNode): Future[Response | AsyncResponse] {.multisync.} =
-  ## Classifies if text violates OpenAI's Content Policy
-  let verifiedBody = parseModerationRequest(body)
-  apiConfig.client.headers["Content-Type"] = "application/json"
-  result = await postToOpenAi(apiConfig.client, "/moderations", $verifiedBody)
+    result = await getFromOpenAi(apiConfig.client, fmt"/fine-tunes/{fineTuneId}")
+
+proc cancelFineTune*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, fineTuneId: string
+): Response | Future[AsyncResponse] =
+    ## Immediately cancel a fine-tune job.
+    result = await postToOpenAi(apiConfig.client, fmt"/fines-tunes/{fineTuneId}/cancel")
+
+proc listFineTuneEvents*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, fineTuneId: string
+): Response | Future[AsyncResponse] =
+    ## Get fine-grained status updates for a fine-tune job.
+    result =
+        await getFromOpenAi(apiConfig.client, fmt"/fines-tunes/{fineTuneId}/events")
+
+proc listModels*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Lists the currently available models, and provides basic information about each one such as the owner and availability.
+    result = await getFromOpenAi(apiConfig.client, "/models")
+
+proc retrieveModel*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, model: string
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Retrieves a model instance, providing basic information about the model such as the owner and permissioning.
+    result = await getFromOpenAi(apiConfig.client, fmt"/models/{model}")
+
+proc deleteModel*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, model: string
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Delete a fine-tuned model. You must have the Owner role in your organization.
+    result = await deleteFromOpenAi(apiConfig.client, fmt"/models/{model}")
+
+proc createModeration*(
+        apiConfig: OpenAi_Client | Async_OpenAi_Client, body: JsonNode
+): Future[Response | AsyncResponse] {.multisync.} =
+    ## Classifies if text violates OpenAI's Content Policy
+    let verifiedBody = parseModerationRequest(body)
+    apiConfig.client.headers["Content-Type"] = "application/json"
+    result = await postToOpenAi(apiConfig.client, "/moderations", $verifiedBody)
